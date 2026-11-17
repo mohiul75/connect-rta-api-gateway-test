@@ -14,73 +14,132 @@ const requestHandler = createRequestHandler(
   import.meta.env.MODE,
 );
 
-const DIAGNOSTIC_BUILD = "connect-rta-origin-probe-2026-11-17-v2";
+const BUILD_ID = "connect-rta-auth-test-v1";
 
-async function probe(url: string) {
-  try {
-    const response = await fetch(url, {
-      method: "GET",
-      headers: {
-        Accept: "application/json, text/html;q=0.9, */*;q=0.8",
-        "User-Agent": "ConnectRTA-Worker-Probe/2.0",
-      },
-      redirect: "manual",
-      signal: AbortSignal.timeout(15000),
-    });
+const ORIGIN = "https://rta.gov.bd";
 
-    const body = await response.text();
+const ALLOWED_ORIGINS = new Set([
+  "https://rta.gov.bd",
+  "https://www.rta.gov.bd",
+]);
 
-    return {
-      requested_url: url,
-      status: response.status,
-      status_text: response.statusText,
-      content_type: response.headers.get("content-type"),
-      server: response.headers.get("server"),
-      location: response.headers.get("location"),
-      cf_ray: response.headers.get("cf-ray"),
-      response_preview: body.slice(0, 350),
-    };
-  } catch (error) {
-    return {
-      requested_url: url,
-      error: error instanceof Error ? error.message : String(error),
-    };
+const ROUTES: Record<string, string> = {
+  "POST /api/mobile/auth/login": "/api/mobile/auth/login",
+  "GET /api/mobile/auth/profile": "/api/mobile/auth/profile",
+};
+
+function corsHeaders(origin: string | null): Headers {
+  const headers = new Headers({
+    "Cache-Control": "no-store",
+    "Vary": "Origin",
+  });
+
+  if (origin && ALLOWED_ORIGINS.has(origin)) {
+    headers.set("Access-Control-Allow-Origin", origin);
+    headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    headers.set(
+      "Access-Control-Allow-Headers",
+      "Accept, Authorization, Content-Type, X-Requested-With",
+    );
+    headers.set("Access-Control-Max-Age", "600");
   }
+
+  return headers;
 }
 
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    const origin = request.headers.get("Origin");
 
-    if (url.pathname === "/_origin_probe") {
-      if (request.method !== "GET") {
+    if (url.pathname.startsWith("/api/mobile/auth/")) {
+      if (origin && !ALLOWED_ORIGINS.has(origin)) {
         return Response.json(
-          { error: "Method not allowed" },
-          { status: 405, headers: { Allow: "GET" } },
+          { message: "Origin not allowed." },
+          { status: 403 },
         );
       }
 
-      const targets = [
-        "https://rta.gov.bd/up",
-        "https://rta.gov.bd/api/mobile/auth/profile",
-        "https://www.rta.gov.bd/api/mobile/auth/profile",
-      ];
+      if (request.method === "OPTIONS") {
+        const headers = corsHeaders(origin);
 
-      const results = await Promise.all(targets.map(probe));
+        if (origin && !headers.has("Access-Control-Allow-Origin")) {
+          return Response.json(
+            { message: "Origin not allowed." },
+            { status: 403 },
+          );
+        }
 
-      return Response.json(
-        {
-          diagnostic: "Connect RTA three-endpoint origin probe",
-          build_id: DIAGNOSTIC_BUILD,
-          tested_at: new Date().toISOString(),
-          results,
-        },
-        {
-          headers: {
-            "Cache-Control": "no-store, no-cache, must-revalidate",
+        return new Response(null, {
+          status: 204,
+          headers,
+        });
+      }
+
+      const routeKey = `${request.method} ${url.pathname}`;
+      const destinationPath = ROUTES[routeKey];
+
+      if (!destinationPath) {
+        return Response.json(
+          { message: "Route or method not allowed by test gateway." },
+          { status: 405 },
+          );
+      }
+
+      try {
+        const headers = new Headers();
+
+        for (const name of [
+          "Accept",
+          "Content-Type",
+          "Authorization",
+          "X-Requested-With",
+        ]) {
+          const value = request.headers.get(name);
+          if (value) headers.set(name, value);
+        }
+
+        const target = new URL(destinationPath, ORIGIN);
+
+        const upstreamRequest = new Request(target, {
+          method: request.method,
+          headers,
+          body: request.method === "GET" ? undefined : request.body,
+          redirect: "manual",
+        });
+
+        const upstreamResponse = await fetch(upstreamRequest);
+
+        const responseHeaders = new Headers();
+
+        for (const name of [
+          "Content-Type",
+          "Cache-Control",
+          "WWW-Authenticate",
+        ]) {
+          const value = upstreamResponse.headers.get(name);
+          if (value) responseHeaders.set(name, value);
+        }
+
+        for (const [name, value] of corsHeaders(origin)) {
+          responseHeaders.set(name, value);
+        }
+
+        responseHeaders.set("X-Connect-RTA-Gateway", BUILD_ID);
+
+        return new Response(upstreamResponse.body, {
+          status: upstreamResponse.status,
+          headers: responseHeaders,
+        });
+      } catch {
+        return Response.json(
+          {
+            message: "The test gateway could not reach the RTA API.",
+            gateway_build: BUILD_ID,
           },
-        },
-      );
+          { status: 502 },
+        );
+      }
     }
 
     return requestHandler(request, {
