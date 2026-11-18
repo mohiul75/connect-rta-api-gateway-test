@@ -14,7 +14,7 @@ const requestHandler = createRequestHandler(
   import.meta.env.MODE,
 );
 
-const BUILD_ID = "connect-rta-auth-test-v1";
+const BUILD_ID = "connect-rta-messenger-test-v1";
 
 const ORIGIN = "https://rta.gov.bd";
 
@@ -26,8 +26,9 @@ const ALLOWED_ORIGINS = new Set([
 const ROUTES: Record<string, string> = {
   "POST /api/mobile/auth/login": "/api/mobile/auth/login",
   "GET /api/mobile/auth/profile": "/api/mobile/auth/profile",
+  "GET /api/mobile/messenger/conversations":
+    "/api/mobile/messenger/conversations",
 };
-
 function corsHeaders(origin: string | null): Headers {
   const headers = new Headers({
     "Cache-Control": "no-store",
@@ -52,7 +53,7 @@ export default {
     const url = new URL(request.url);
     const origin = request.headers.get("Origin");
 
-    if (url.pathname.startsWith("/api/mobile/auth/")) {
+    if (url.pathname.startsWith("/api/mobile/")) {
       if (origin && !ALLOWED_ORIGINS.has(origin)) {
         return Response.json(
           { message: "Origin not allowed." },
@@ -100,6 +101,7 @@ export default {
         }
 
         const target = new URL(destinationPath, ORIGIN);
+        target.search = url.search;
 
         const upstreamRequest = new Request(target, {
           method: request.method,
