@@ -14,8 +14,7 @@ const requestHandler = createRequestHandler(
   import.meta.env.MODE,
 );
 
-const BUILD_ID = "connect-rta-messenger-test-v1";
-
+const BUILD_ID = "connect-rta-messenger-groups-test-v1";
 const ORIGIN = "https://rta.gov.bd";
 
 const ALLOWED_ORIGINS = new Set([
@@ -28,6 +27,8 @@ const ROUTES: Record<string, string> = {
   "GET /api/mobile/auth/profile": "/api/mobile/auth/profile",
   "GET /api/mobile/messenger/conversations":
     "/api/mobile/messenger/conversations",
+  "GET /api/mobile/messenger/groups":
+    "/api/mobile/messenger/groups",
 };
 function corsHeaders(origin: string | null): Headers {
   const headers = new Headers({
